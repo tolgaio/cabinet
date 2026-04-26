@@ -12,6 +12,20 @@ export interface ConversationArtifact {
   label?: string;
 }
 
+export type ConversationRuntime = "pty" | "headless" | "structured";
+
+export type ConversationKillReason =
+  | "timeout"
+  | "user-stop"
+  | "exit"
+  | "crash";
+
+export type ConversationStatusSource =
+  | "auto-exit"
+  | "adapter"
+  | "exit-code-fallback"
+  | "timeout";
+
 export interface ConversationMeta {
   id: string;
   agentSlug: string;
@@ -27,12 +41,18 @@ export interface ConversationMeta {
   providerId?: string;
   adapterType?: string;
   adapterConfig?: Record<string, unknown>;
+  runtime?: ConversationRuntime;
   promptPath: string;
   transcriptPath: string;
   mentionedPaths: string[];
   artifactPaths: string[];
   summary?: string;
   contextSummary?: string;
+  timedOut?: boolean;
+  signal?: number | null;
+  durationMs?: number;
+  killReason?: ConversationKillReason;
+  resolvedStatusSource?: ConversationStatusSource;
 }
 
 export interface ConversationDetail {

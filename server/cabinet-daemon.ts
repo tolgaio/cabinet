@@ -140,6 +140,10 @@ interface BaseSession {
   resolvingStatus?: boolean;
   stopFallbackTimer?: NodeJS.Timeout;
   stop: (signal?: NodeJS.Signals) => void;
+  exitSignalName?: string | null;
+  exitSignalNumber?: number | null;
+  timedOut?: boolean;
+  stoppedByUser?: boolean;
 }
 
 interface PtySession extends BaseSession {
@@ -374,6 +378,73 @@ function maybeAutoExitClaudeSession(session: PtySession): void {
   }, CLAUDE_AUTO_EXIT_GRACE_MS);
 }
 
+function deriveSessionRuntime(session: ActiveSession): "pty" | "headless" | "structured" {
+  if (session.kind === "pty") return "pty";
+  if (session.adapterType === "claude_headless") return "headless";
+  return "structured";
+}
+
+const SIGNAL_NAME_TO_NUMBER: Record<string, number> = {
+  SIGHUP: 1,
+  SIGINT: 2,
+  SIGQUIT: 3,
+  SIGABRT: 6,
+  SIGKILL: 9,
+  SIGTERM: 15,
+};
+
+function deriveSessionDiagnostics(session: ActiveSession): {
+  signal: number | null;
+  killReason: "timeout" | "user-stop" | "exit" | "crash";
+  resolvedStatusSource: "auto-exit" | "adapter" | "exit-code-fallback" | "timeout";
+  timedOut: boolean;
+} {
+  const exitCode = session.exitCode;
+  const signalFromName = session.exitSignalName
+    ? SIGNAL_NAME_TO_NUMBER[session.exitSignalName] ?? null
+    : null;
+  const signalFromNumber =
+    typeof session.exitSignalNumber === "number" && session.exitSignalNumber > 0
+      ? session.exitSignalNumber
+      : null;
+  const signalFromExitCode =
+    typeof exitCode === "number" && exitCode > 128 ? exitCode - 128 : null;
+  const signal = signalFromName ?? signalFromNumber ?? signalFromExitCode;
+
+  const stoppedByUser = !!session.stoppedByUser;
+  const timedOut = !!session.timedOut || signal === 9 || signal === 15;
+
+  let killReason: "timeout" | "user-stop" | "exit" | "crash" = "exit";
+  if (stoppedByUser) {
+    killReason = "user-stop";
+  } else if (timedOut) {
+    killReason = "timeout";
+  } else if (signal === 1) {
+    // SIGHUP without an explicit user stop is the PTY auto-exit miss seen in
+    // the heartbeat investigation — classify it the same way.
+    killReason = "timeout";
+  } else if (
+    typeof exitCode === "number" &&
+    exitCode !== 0 &&
+    !session.resolvedStatus
+  ) {
+    killReason = "crash";
+  }
+
+  let resolvedStatusSource: "auto-exit" | "adapter" | "exit-code-fallback" | "timeout";
+  if (session.resolvedStatus && session.kind === "structured") {
+    resolvedStatusSource = "adapter";
+  } else if (session.resolvedStatus) {
+    resolvedStatusSource = "auto-exit";
+  } else if (killReason === "timeout") {
+    resolvedStatusSource = "timeout";
+  } else {
+    resolvedStatusSource = "exit-code-fallback";
+  }
+
+  return { signal, killReason, resolvedStatusSource, timedOut };
+}
+
 async function finalizeSessionConversation(session: ActiveSession): Promise<void> {
   const meta = await readConversationMeta(session.id);
   if (!meta) return;
@@ -383,10 +454,20 @@ async function finalizeSessionConversation(session: ActiveSession): Promise<void
     completedOutput.set(session.id, { output: plain, completedAt: Date.now() });
     return;
   }
+  const startedMs = session.createdAt.getTime();
+  const completedMs = Date.now();
+  const durationMs = Math.max(0, completedMs - startedMs);
+  const diagnostics = deriveSessionDiagnostics(session);
   await finalizeConversation(session.id, {
     status: session.resolvedStatus || (session.exitCode === 0 ? "completed" : "failed"),
     exitCode: session.resolvedStatus === "completed" ? 0 : session.exitCode,
     output: plain,
+    runtime: deriveSessionRuntime(session),
+    durationMs,
+    signal: diagnostics.signal,
+    timedOut: diagnostics.timedOut,
+    killReason: diagnostics.killReason,
+    resolvedStatusSource: diagnostics.resolvedStatusSource,
   }, meta.cabinetPath);
 }
 
@@ -649,10 +730,13 @@ function createDetachedSession(input: {
     maybeAutoExitClaudeSession(session);
   });
 
-  term.onExit(({ exitCode }) => {
+  term.onExit(({ exitCode, signal }) => {
     console.log(`Session ${input.sessionId} PTY exited with code ${exitCode}`);
     session.exited = true;
     session.exitCode = exitCode;
+    if (typeof signal === "number" && signal > 0) {
+      session.exitSignalNumber = signal;
+    }
     clearSessionStopFallbackTimer(session);
     if (session.timeoutHandle) {
       clearTimeout(session.timeoutHandle);
@@ -686,6 +770,7 @@ function createDetachedSession(input: {
   if (input.timeoutSeconds && input.timeoutSeconds > 0) {
     session.timeoutHandle = setTimeout(() => {
       console.warn(`Session ${input.sessionId} timed out after ${input.timeoutSeconds}s`);
+      session.timedOut = true;
       try {
         term.kill();
       } catch {}
@@ -771,6 +856,8 @@ function createStructuredSession(input: {
 
       session.exited = true;
       session.exitCode = result.exitCode;
+      session.exitSignalName = result.signal ?? null;
+      session.timedOut = !!result.timedOut;
       session.resolvedStatus =
         result.exitCode === 0 && !result.timedOut ? "completed" : "failed";
       clearSessionStopFallbackTimer(session);
@@ -1292,6 +1379,7 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       // SIGTERM first, then SIGKILL after 2s if still alive
+      session.stoppedByUser = true;
       session.stop("SIGTERM");
       session.stopFallbackTimer = setTimeout(() => {
         if (!session.exited) {
