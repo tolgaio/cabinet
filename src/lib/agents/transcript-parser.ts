@@ -12,8 +12,14 @@ export type DiffLine = {
 };
 
 const DIFF_START = /^diff --git /;
-const STRUCTURED_RE =
-  /^(SUMMARY|CONTEXT|CONTEXT_UPDATE|ARTIFACT|DECISION|LEARNING|GOAL_UPDATE|MESSAGE_TO)\s*(?:\[([^\]]*)\])?:\s*(.*)$/;
+const STRUCTURED_TAGS =
+  "SUMMARY|CONTEXT|CONTEXT_UPDATE|ARTIFACT|DECISION|LEARNING|GOAL_UPDATE|MESSAGE_TO|SLACK|TASK_CREATE|TASK_COMPLETE";
+const STRUCTURED_RE = new RegExp(
+  `^(${STRUCTURED_TAGS})(?:\\s*\\[([^\\]]*)\\]|\\s+([^\\s:][^:]*?))?:\\s*(.*)$`
+);
+const STRUCTURED_LINE_RE = new RegExp(
+  `^(${STRUCTURED_TAGS})(?:\\s*\\[([^\\]]*)\\]|\\s+([^\\s:][^:]*?))?:\\s+(.*)$`
+);
 const TOKENS_RE = /^[\d,]+$/;
 
 function preprocess(text: string): string {
@@ -106,11 +112,12 @@ function parseCodeBlock(
       if (allStructured) {
         const fields = nonEmpty.map((line) => {
           const structuredMatch = line.match(STRUCTURED_RE)!;
+          const recipient = structuredMatch[2] ?? structuredMatch[3];
           return {
-            label: structuredMatch[2]
-              ? `${structuredMatch[1]} [${structuredMatch[2]}]`
+            label: recipient
+              ? `${structuredMatch[1]} [${recipient.trim()}]`
               : structuredMatch[1],
-            value: structuredMatch[3],
+            value: structuredMatch[4],
           };
         });
         return { block: { type: "cabinet", fields }, endIdx: i + 1 };
@@ -129,12 +136,11 @@ function parseCodeBlock(
 }
 
 function parseStructuredLine(line: string): Block | null {
-  const match = line.match(
-    /^(SUMMARY|CONTEXT|CONTEXT_UPDATE|ARTIFACT|DECISION|LEARNING|GOAL_UPDATE|MESSAGE_TO)\s*(?:\[([^\]]*)\])?:\s+(.*)$/
-  );
+  const match = line.match(STRUCTURED_LINE_RE);
   if (!match) return null;
-  const label = match[2] ? `${match[1]} [${match[2]}]` : match[1];
-  return { type: "structured", label, value: match[3] };
+  const recipient = match[2] ?? match[3];
+  const label = recipient ? `${match[1]} [${recipient.trim()}]` : match[1];
+  return { type: "structured", label, value: match[4] };
 }
 
 export function parseTranscript(raw: string): Block[] {

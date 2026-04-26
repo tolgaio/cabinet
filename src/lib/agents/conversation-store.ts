@@ -130,6 +130,45 @@ function artifactsPathFs(id: string, cabinetPath?: string): string {
   return path.join(conversationDir(id, cabinetPath), "artifacts.json");
 }
 
+function eventsPathFs(id: string, cabinetPath?: string): string {
+  return path.join(conversationDir(id, cabinetPath), "events.jsonl");
+}
+
+export type ConversationEvent = {
+  at: string;
+  type: string;
+} & Record<string, unknown>;
+
+export async function appendConversationEvent(
+  id: string,
+  event: ConversationEvent,
+  cabinetPath?: string
+): Promise<void> {
+  await ensureDirectory(conversationDir(id, cabinetPath));
+  const line = `${JSON.stringify(event)}\n`;
+  await fs.appendFile(eventsPathFs(id, cabinetPath), line, "utf-8");
+}
+
+export async function readConversationEvents(
+  id: string,
+  cabinetPath?: string
+): Promise<ConversationEvent[]> {
+  const filePath = eventsPathFs(id, cabinetPath);
+  if (!(await fileExists(filePath))) return [];
+  const raw = await readFileContent(filePath);
+  const events: ConversationEvent[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      events.push(JSON.parse(trimmed) as ConversationEvent);
+    } catch {
+      // Skip malformed lines so a partial write can't break readback.
+    }
+  }
+  return events;
+}
+
 function makeSummaryFromOutput(output: string): string | undefined {
   const lines = output
     .split("\n")
@@ -756,6 +795,12 @@ export async function finalizeConversation(
     status: ConversationStatus;
     exitCode?: number | null;
     output?: string;
+    runtime?: ConversationMeta["runtime"];
+    timedOut?: boolean;
+    signal?: number | null;
+    durationMs?: number;
+    killReason?: ConversationMeta["killReason"];
+    resolvedStatusSource?: ConversationMeta["resolvedStatusSource"];
   },
   cabinetPath?: string
 ): Promise<ConversationMeta | null> {
@@ -784,6 +829,22 @@ export async function finalizeConversation(
   meta.summary = parsed.summary || makeSummaryFromOutput(cleanedOutput);
   meta.contextSummary = parsed.contextSummary;
   meta.artifactPaths = artifacts.map((artifact) => artifact.path);
+  if (input.runtime) meta.runtime = input.runtime;
+  if (typeof input.timedOut === "boolean") meta.timedOut = input.timedOut;
+  if (typeof input.signal === "number" || input.signal === null) {
+    meta.signal = input.signal;
+  }
+  if (typeof input.durationMs === "number") {
+    meta.durationMs = input.durationMs;
+  } else if (meta.completedAt) {
+    const startedMs = Date.parse(meta.startedAt);
+    const completedMs = Date.parse(meta.completedAt);
+    if (Number.isFinite(startedMs) && Number.isFinite(completedMs)) {
+      meta.durationMs = Math.max(0, completedMs - startedMs);
+    }
+  }
+  if (input.killReason) meta.killReason = input.killReason;
+  if (input.resolvedStatusSource) meta.resolvedStatusSource = input.resolvedStatusSource;
 
   await Promise.all([
     writeConversationMeta(meta),

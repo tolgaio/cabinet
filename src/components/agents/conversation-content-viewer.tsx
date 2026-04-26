@@ -13,6 +13,9 @@ const LABEL_COLORS: Record<string, string> = {
   LEARNING: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
   GOAL_UPDATE: "bg-pink-500/15 text-pink-400 border-pink-500/20",
   MESSAGE_TO: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+  SLACK: "bg-sky-500/15 text-sky-400 border-sky-500/20",
+  TASK_CREATE: "bg-rose-500/15 text-rose-400 border-rose-500/20",
+  TASK_COMPLETE: "bg-teal-500/15 text-teal-400 border-teal-500/20",
 };
 
 function renderInlineFormatting(text: string): ReactNode[] {

@@ -193,21 +193,27 @@ async function processHeartbeatOutput(
       );
     }
 
-    const messageMatches = memoryBlock.matchAll(/MESSAGE_TO\s+\[([^\]]+)\]:\s*(.*)/g);
+    const messageMatches = memoryBlock.matchAll(
+      /MESSAGE_TO\s+(?:\[([^\]]+)\]|([^\s:]+)):\s*(.*)/g
+    );
     for (const match of messageMatches) {
       const { sendMessage } = await import("./persona-manager");
-      await sendMessage(slug, match[1], match[2].trim(), cabinetPath);
+      const recipient = (match[1] ?? match[2]).trim();
+      await sendMessage(slug, recipient, match[3].trim(), cabinetPath);
     }
 
-    const slackMatches = memoryBlock.matchAll(/SLACK\s+\[([^\]]+)\]:\s*(.*)/g);
+    const slackMatches = memoryBlock.matchAll(
+      /SLACK\s+(?:\[([^\]]+)\]|([^\s:]+)):\s*(.*)/g
+    );
     for (const match of slackMatches) {
+      const channel = (match[1] ?? match[2]).trim();
       await postMessage({
-        channel: match[1],
+        channel,
         agent: slug,
         emoji: persona.emoji,
         displayName: persona.name,
         type: "message",
-        content: match[2].trim(),
+        content: match[3].trim(),
         mentions: [],
         kbRefs: [],
       });
@@ -220,13 +226,15 @@ async function processHeartbeatOutput(
       if (increment > 0) await updateGoal(slug, metric, increment);
     }
 
-    const taskMatches = memoryBlock.matchAll(/TASK_CREATE\s+\[([^\]]+)\]\s*\[?(\d)?\]?:\s*([^|]+)(?:\|\s*(.*))?/g);
+    const taskMatches = memoryBlock.matchAll(
+      /TASK_CREATE\s+(?:\[([^\]]+)\]|([^\s:[]+))(?:\s*\[(\d)\])?:\s*([^|]+)(?:\|\s*(.*))?/g
+    );
     for (const match of taskMatches) {
       const { createTask } = await import("./task-inbox");
-      const toAgent = match[1].trim();
-      const priority = match[2] ? parseInt(match[2], 10) : 3;
-      const title = match[3].trim();
-      const description = match[4]?.trim() || "";
+      const toAgent = (match[1] ?? match[2]).trim();
+      const priority = match[3] ? parseInt(match[3], 10) : 3;
+      const title = match[4].trim();
+      const description = match[5]?.trim() || "";
       await createTask({
         fromAgent: slug, fromEmoji: persona.emoji, fromName: persona.name,
         toAgent, channel: persona.channels?.[0] || "general",

@@ -6,6 +6,7 @@ import type {
   AgentExecutionAdapter,
 } from "./types";
 import { claudeLocalAdapter } from "./claude-local";
+import { claudeHeadlessAdapter } from "./claude-headless";
 import { codexLocalAdapter } from "./codex-local";
 import { providerStatusToEnvironmentTest } from "./environment";
 import { geminiLocalAdapter } from "./gemini-local";
@@ -20,6 +21,15 @@ export const DEFAULT_ADAPTER_BY_PROVIDER_ID: Record<string, string> = {
   "codex-cli": codexLocalAdapter.type,
   "gemini-cli": geminiLocalAdapter.type,
 };
+
+function resolveClaudeRuntimeOverride(): string | null {
+  const raw = process.env.CABINET_DEFAULT_CLAUDE_RUNTIME?.trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "headless") return claudeHeadlessAdapter.type;
+  if (raw === "local" || raw === "structured") return claudeLocalAdapter.type;
+  if (raw === "pty" || raw === "legacy") return "claude_code_legacy";
+  return null;
+}
 
 export const LEGACY_PROVIDER_ID_BY_ADAPTER: Record<string, string> = Object.fromEntries(
   Object.entries(LEGACY_ADAPTER_BY_PROVIDER_ID).map(([providerId, adapterType]) => [
@@ -100,6 +110,7 @@ class AgentAdapterRegistry {
 export const agentAdapterRegistry = new AgentAdapterRegistry();
 
 agentAdapterRegistry.register(claudeLocalAdapter);
+agentAdapterRegistry.register(claudeHeadlessAdapter);
 agentAdapterRegistry.register(codexLocalAdapter);
 agentAdapterRegistry.register(geminiLocalAdapter);
 agentAdapterRegistry.register(legacyClaudeCodeAdapter);
@@ -108,11 +119,20 @@ agentAdapterRegistry.register(legacyCodexCliAdapter);
 export function defaultAdapterTypeForProvider(
   providerId?: string | null
 ): string {
+  if (providerId === "claude-code") {
+    const override = resolveClaudeRuntimeOverride();
+    if (override) return override;
+  }
+
   if (providerId && DEFAULT_ADAPTER_BY_PROVIDER_ID[providerId]) {
     return DEFAULT_ADAPTER_BY_PROVIDER_ID[providerId];
   }
 
   const defaultProviderId = providerRegistry.defaultProvider;
+  if (defaultProviderId === "claude-code") {
+    const override = resolveClaudeRuntimeOverride();
+    if (override) return override;
+  }
   return (
     DEFAULT_ADAPTER_BY_PROVIDER_ID[defaultProviderId] ||
     agentAdapterRegistry.defaultAdapterType

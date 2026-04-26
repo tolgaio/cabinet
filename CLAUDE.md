@@ -82,6 +82,26 @@ When Cabinet starts an AI edit or task run:
 The AI panel supports `@` mentions — users type `@PageName` to attach other pages as context. The mentioned pages' content is fetched and appended to the prompt so Claude has full context.
 
 
+## Claude Runtime Selection
+
+Cabinet supports three Claude runtimes for detached runs:
+
+- `claude_local` (default) — structured CLI via `runChildProcess`, `claude -p --output-format stream-json --include-partial-messages --dangerously-skip-permissions`. No PTY.
+- `claude_headless` — multica-style headless. `claude -p --output-format stream-json --input-format stream-json --strict-mcp-config --permission-mode bypassPermissions`. Filters `CLAUDECODE*` / `CLAUDE_CODE_*` env vars before spawn. Auto-allows `control_request` events. Supports `--resume <session-id>`. Persists each event to `events.jsonl` alongside `transcript.txt`.
+- `claude_code_legacy` — original PTY path. Kept as escape hatch.
+
+To opt the entire app into the headless runtime by default:
+
+```
+CABINET_DEFAULT_CLAUDE_RUNTIME=headless npm run dev:all
+```
+
+Accepted values: `headless`, `local` / `structured` (current default), `pty` / `legacy`. Falls back silently if unset.
+
+Per-conversation override: pass `adapterType: "claude_headless"` when creating a conversation, or set `adapterType: claude_headless` on a persona / job.
+
+`ConversationMeta` records `runtime`, `durationMs`, `signal`, `timedOut`, `killReason`, `resolvedStatusSource` so failures (or timeouts) can be diagnosed without replaying the run.
+
 ## Commands
 
 ```bash

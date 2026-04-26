@@ -1,5 +1,7 @@
 # Progress
 
+[2026-04-26] Added opt-in `claude_headless` adapter (multica-style: `claude -p --output-format stream-json --input-format stream-json --strict-mcp-config --permission-mode bypassPermissions`, control_request auto-allow, env filter for `CLAUDECODE*`/`CLAUDE_CODE_*`, `events.jsonl` persistence, `--resume` support). Selectable via `adapterType: "claude_headless"` or `CABINET_DEFAULT_CLAUDE_RUNTIME=headless`. Extended `ConversationMeta` with `runtime`, `durationMs`, `signal`, `timedOut`, `killReason`, `resolvedStatusSource` to make heartbeat false-failed cases diagnosable from the meta alone, and surfaced them in the task detail panel.
+
 [2026-04-16] Claude Code model labels now include version numbers in the runtime picker ("Claude Opus 4.7", "Claude Sonnet 4.6", "Claude Haiku 4.5"), with Opus listed first.
 
 [2026-04-16] Runtime picker: fixed gap between tabs and model table by wrapping the TabsList in a flex container, eliminating the CSS inline-flex baseline descender space that was adding ~4px below the tab buttons. Inactive tabs now use bg-muted/60 so the active tab stands out clearly.

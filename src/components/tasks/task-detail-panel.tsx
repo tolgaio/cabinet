@@ -78,20 +78,58 @@ function formatProviderLabel(providerId?: string): string | null {
     .join(" ");
 }
 
+function formatRuntimeName(runtime?: ConversationMeta["runtime"]): string | null {
+  if (!runtime) return null;
+  if (runtime === "pty") return "PTY";
+  if (runtime === "headless") return "Headless";
+  if (runtime === "structured") return "Structured";
+  return null;
+}
+
 function buildRuntimeLabel(
-  meta: Pick<ConversationMeta, "adapterConfig" | "providerId">
+  meta: Pick<ConversationMeta, "adapterConfig" | "providerId" | "runtime">
 ): string | null {
   const model = readConversationModel(meta);
   const effort = readConversationEffort(meta);
   const provider = formatProviderLabel(meta.providerId);
+  const runtime = formatRuntimeName(meta.runtime);
 
-  if (model && provider && effort) return `${model} · ${provider} · ${effort}`;
-  if (model && provider) return `${model} · ${provider}`;
-  if (model && effort) return `${model} · ${effort}`;
-  if (model) return model;
-  if (provider && effort) return `${provider} · ${effort}`;
-  if (provider) return `${provider} · default model`;
+  const baseSegments = [model, provider, effort].filter(Boolean) as string[];
+  let base: string | null = baseSegments.length > 0 ? baseSegments.join(" · ") : null;
+  if (!base && provider) base = `${provider} · default model`;
+
+  if (base && runtime) return `${base} · ${runtime}`;
+  if (base) return base;
+  if (runtime) return runtime;
   return null;
+}
+
+function formatDurationMs(ms?: number): string | null {
+  if (typeof ms !== "number" || ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
+function buildDiagnosticsLine(meta: ConversationMeta): string | null {
+  const parts: string[] = [];
+  const duration = formatDurationMs(meta.durationMs);
+  if (duration) parts.push(duration);
+  if (meta.timedOut) parts.push("timed out");
+  if (typeof meta.signal === "number" && meta.signal > 0) {
+    parts.push(`signal ${meta.signal}`);
+  } else if (typeof meta.exitCode === "number" && meta.exitCode !== 0) {
+    parts.push(`exit ${meta.exitCode}`);
+  }
+  if (meta.killReason && meta.killReason !== "exit") {
+    parts.push(meta.killReason);
+  }
+  if (meta.resolvedStatusSource) {
+    parts.push(meta.resolvedStatusSource);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export function TaskDetailPanel() {
@@ -124,6 +162,14 @@ export function TaskDetailPanel() {
               <p className="truncate">{runtimeLabel}</p>
             </div>
           ) : null}
+          {(() => {
+            const diagnostics = buildDiagnosticsLine(activeConversation);
+            return diagnostics ? (
+              <p className="mt-0.5 truncate pl-4 text-[11px] text-muted-foreground/80">
+                {diagnostics}
+              </p>
+            ) : null;
+          })()}
         </div>
         <Button
           variant="ghost"
