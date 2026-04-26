@@ -495,10 +495,14 @@ async function runHeadless(
     });
   });
 
-  await new Promise<void>((resolve) => {
-    stdoutLines.once("close", () => resolve());
+  // The child has fully closed by the time we get here, so its stdout has
+  // already ended and readline has flushed all "line" events. Closing the
+  // interface defensively in case it isn't already, but we don't await its
+  // "close" — by the time we attach the listener, the event has typically
+  // already fired and the await would hang.
+  if (!stdoutLines.closed) {
     stdoutLines.close();
-  });
+  }
 
   const output = acc.finalText || null;
   const summaryLine = output ? firstNonEmptyLine(output)?.slice(0, 300) || null : null;
