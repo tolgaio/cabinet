@@ -470,6 +470,16 @@ async function runHeadless(
   }
 
   writeToStdin(buildInitialPromptEnvelope(ctx.prompt));
+  // Single-shot: signal end-of-input so Claude exits after the result event
+  // instead of parking in epoll_wait expecting more stream-json turns.
+  // Multi-turn happens via fresh `--resume <session_id>` invocations, not by
+  // keeping this stdin open. `bypassPermissions` means no control_request
+  // round-trip is needed.
+  try {
+    child.stdin.end();
+  } catch {
+    // Already closed or errored — covered by the stdin error handler above.
+  }
 
   const exitInfo = await new Promise<{
     exitCode: number | null;
